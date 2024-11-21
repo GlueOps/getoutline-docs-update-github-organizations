@@ -64,7 +64,8 @@ def get_organizations():
 
 def generate_markdown(orgs):
     logger.debug("Generating markdown for organizations.")
-    markdown_content = "# GitHub Organizations\n\n"
+    markdown_content = "> This page is automatically generated. Any manual changes will be lost. See: https://github.com/GlueOps/getoutline-docs-update-github \n\n"
+    markdown_content = "# Full list of GitHub Organizations\n\n"
     markdown_content += "| Organization Name | Description |\n"
     markdown_content += "|-------------------|-------------|\n"
     
