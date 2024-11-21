@@ -1,4 +1,4 @@
-# getoutline-docs-update-github-organizations
+# getoutline-docs-update-github
 
 Generates dynamic documentation of all our GitHub Organizations and their descriptions and updates GetOutline.com with these details. This makes it easier for discovery and search within getoutline.com
 
