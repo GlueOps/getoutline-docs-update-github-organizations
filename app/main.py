@@ -1,10 +1,13 @@
 import requests
 import os
 import glueops.setup_logging
-
-
+import glueops.getoutline
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from github import GitHubClient
 
 GITHUB_API_URL = "https://api.github.com"
+GETOUTLINE_API_URL = "https://app.getoutline.com"
+
 # Environment Variables
 REQUIRED_ENV_VARS = [
     "GITHUB_TOKEN",
@@ -18,7 +21,14 @@ OPTIONAL_ENV_VARS = {
 }
 
 def get_env_variable(var_name: str, default=None):
-    """Retrieve environment variable or return default if not set."""
+    """
+    Retrieve environment variable or return default if not set.
+
+    :param var_name: Name of the environment variable.
+    :param default: Default value if the environment variable is not set.
+    :return: Value of the environment variable or default.
+    :raises EnvironmentError: If a required environment variable is not set.
+    """
     value = os.getenv(var_name, default)
     if var_name in REQUIRED_ENV_VARS and value is None:
         logger.error(f"Environment variable '{var_name}' is not set.")
@@ -47,64 +57,65 @@ except EnvironmentError as env_err:
     logger.critical(f"Environment setup failed: {env_err}")
     raise
 
-def get_organizations():
-    logger.debug("Fetching organizations from GitHub API.")
-    headers = {
-        'Authorization': f'token {GITHUB_TOKEN}',
-        'Accept': 'application/vnd.github.v3+json',
-    }
-    try:
-        response = requests.get(f"{GITHUB_API_URL}/user/orgs", headers=headers)
-        response.raise_for_status()
-        logger.debug("Organizations fetched successfully.")
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching organizations: {e}")
-        return []
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=60, max=120), retry=retry_if_exception_type(requests.exceptions.RequestException))
+def retry_create_document(client, parent_id, title, text):
+    """
+    Retry creating a document in Outline.
 
-def generate_markdown(orgs):
-    logger.debug("Generating markdown for organizations.")
-    markdown_content = "> This page is automatically generated. Any manual changes will be lost. See: https://github.com/GlueOps/getoutline-docs-update-github \n\n"
-    markdown_content = "# Full list of GitHub Organizations\n\n"
-    markdown_content += "| Organization Name | Description |\n"
-    markdown_content += "|-------------------|-------------|\n"
-    
-    for org in orgs:
-        name = org['login']
-        url = f"https://github.com/{org['login']}"
-        description = org.get('description', 'No description available.')
-        markdown_content += f"| [{name}]({url}) | {description} |\n"
-    
-    logger.debug("Markdown generation completed.")
-    return markdown_content
+    :param client: GetOutlineClient instance.
+    :param parent_id: Parent document ID.
+    :param title: Title of the new document.
+    :param text: Content of the new document.
+    :return: Result of the create_document method.
+    """
+    return client.create_document(parent_id, title, text)
 
-def update_document(markdown_text):
-    logger.debug("Updating document on Outline.")
-    url = "https://app.getoutline.com/api/documents.update"
-    payload = {
-        "id": GETOUTLINE_DOCUMENT_ID,
-        "text": markdown_text
-    }
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {GETOUTLINE_API_TOKEN}"
-    }
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        logger.info(f"Document update response code: {response.status_code}")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error updating document: {e}")
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=60, max=120), retry=retry_if_exception_type(requests.exceptions.RequestException))
+def retry_update_document(client, text):
+    """
+    Retry updating a document in Outline.
+
+    :param client: GetOutlineClient instance.
+    :param text: New content for the document.
+    :return: Result of the update_document method.
+    """
+    return client.update_document(text)
+
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=60, max=120), retry=retry_if_exception_type(requests.exceptions.RequestException))
+def retry_generate_markdown_for_org(client, github_org_name):
+    """
+    Retry generating markdown content for a GitHub organization.
+
+    :param client: GitHubClient instance.
+    :param github_org_name: Name of the GitHub organization.
+    :return: Markdown content as a string.
+    """
+    return client.generate_markdown_for_org(github_org_name)
 
 def main():
-    logger.info("Starting.")
-    organizations = get_organizations()
+    """
+    Main function to update GitHub organizations documentation in Outline.
+    """
+    logger.info("Starting GitHub Doc Updates.")
+    GetOutlineClient = glueops.getoutline.GetOutlineClient(GETOUTLINE_API_URL, GETOUTLINE_DOCUMENT_ID, GETOUTLINE_API_TOKEN)
+    github_client = GitHubClient(GITHUB_TOKEN, GITHUB_API_URL)
+    organizations = github_client.get_organizations()
     if organizations:
-        markdown = generate_markdown(organizations)
-        update_document(markdown)
+        logger.info(f"Updating document letting folks know we are updating the list of organizations.")
+        retry_update_document(GetOutlineClient, "# UPDATING..... \n\n #          check back shortly.....\n\n\n")
+        parent_id = GetOutlineClient.get_document_uuid()
+        children = GetOutlineClient.get_children_documents_to_delete(parent_id)
+        for id in children:
+            GetOutlineClient.delete_document(id)
+        for org in organizations:
+            org_specific_markdown_content = retry_generate_markdown_for_org(github_client, org["login"])
+            retry_create_document(GetOutlineClient, parent_id, org["login"], org_specific_markdown_content)
+        markdown = GitHubClient.generate_markdown(organizations)
+        retry_update_document(GetOutlineClient, markdown)
+
+        logger.info("Finished GitHub Doc Updates.")
     else:
         logger.warning("No organizations found.")
-    logger.info("Finished.")
-
+        
 if __name__ == "__main__":
     main()

@@ -21,7 +21,7 @@ Generates dynamic documentation of all our GitHub Organizations and their descri
 The application requires three environment variables to be set. You can create a `.env` file in the root directory of the project with the following content:
 
 ```env
-export GITHUB_TOKEN=<Uses a PAT> #Assumes that all orgs a user is part of is an ORG that we own.
+export GITHUB_TOKEN=<Uses a PAT> #Assumes that all orgs a user is part of is an ORG that we own. Permissions required: **full** `repo` scope and org `read:org` scope
 export GETOUTLINE_DOCUMENT_ID=<This is usually at the end of the document in the URL of the document you want to update>
 export GETOUTLINE_API_TOKEN=<Token is tied to a user account in GETOUTLINE>
 ```
